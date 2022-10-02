@@ -1,7 +1,32 @@
 use gloo_net::http::Request;
-use wasm_bindgen_futures::spawn_local;
+use serde::Deserialize;
+//use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 use yew_router::prelude::*;
+
+#[derive(Deserialize, Clone, Properties, PartialEq)]
+struct Source {
+    state: bool,
+    url: String,
+}
+
+#[derive(Deserialize, Clone, Properties, PartialEq)]
+struct Sources {
+    list: Vec<Source>,
+}
+
+#[function_component(VideosList)]
+fn videos_list(Sources { list }: &Sources) -> Html {
+    list.iter()
+        .enumerate()
+        .map(|(i, video)| {
+            html! {
+                <option value={i.to_string()} style={if video.state {""} else {"display: none;"}}>{video.url.clone()}</option>
+                //<p>{format!("{}: {}", video.state, video.url)}</p>
+            }
+        })
+        .collect()
+}
 
 #[derive(Clone, Routable, PartialEq)]
 enum Route {
@@ -29,16 +54,38 @@ fn app() -> Html {
 
 #[function_component(HelloServer)]
 fn hello_server() -> Html {
-    let data = use_state(|| None);
+    //let data = use_state(|| None);
 
-    // Request `/api/hello` once
+    let sources = use_state(|| Sources { list: vec![] });
     {
+        let sources = sources.clone();
+        use_effect_with_deps(
+            move |_| {
+                let sources = sources.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    let fetched_videos: Sources = Request::get("/api/get_sources_list")
+                        .send()
+                        .await
+                        .unwrap()
+                        .json()
+                        .await
+                        .unwrap();
+                    sources.set(fetched_videos);
+                });
+                || ()
+            },
+            (),
+        );
+    }
+    // Request `/api/hello` once
+    /*{
         let data = data.clone();
         use_effect(move || {
             if data.is_none() {
                 spawn_local(async move {
-                    let resp = Request::get("/api/hello").send().await.unwrap();
-                    let result = {
+                    let fetched_videos: Vec<Video> =
+                    //let resp = Request::get("/api/hello").send().await.unwrap();
+                    /*let result = {
                         if !resp.ok() {
                             Err(format!(
                                 "Error fetching data {} ({})",
@@ -48,16 +95,29 @@ fn hello_server() -> Html {
                         } else {
                             resp.text().await.map_err(|err| err.to_string())
                         }
-                    };
+                    };*/
                     data.set(Some(result));
                 });
             }
 
             || {}
         });
-    }
+    }*/
+    html! {
+        <>
+            <h1>{ "RustConf Explorer" }</h1>
+            <form action="view" method="get">
+                <h3>{"Videos to watch"}</h3>
+                <select>
+                    <option value="" style="display:none">{"Choose one source"}</option>
+                    <VideosList list={sources.list.clone()}/>
+                </select>
+                <input type="submit" value="Open" />
+            </form>
 
-    match data.as_ref() {
+        </>
+    }
+    /*match data.as_ref() {
         None => {
             html! {
                 <div>{"No server response"}</div>
@@ -65,7 +125,15 @@ fn hello_server() -> Html {
         }
         Some(Ok(data)) => {
             html! {
-                <div>{"Got server response: "}{data}</div>
+                <div>{"Got server response: "}{data}
+                <form action="view" method="get">
+                    <select>
+                        <option value="" style="display:none">{"Choose one provider"}</option>
+                        <option value="1">{"One"}</option>
+                        //<option value="2">Two</option>
+                    </select>
+                </form>
+                </div>
             }
         }
         Some(Err(err)) => {
@@ -73,7 +141,7 @@ fn hello_server() -> Html {
                 <div>{"Error requesting data from server: "}{err}</div>
             }
         }
-    }
+    }*/
 }
 
 fn main() {
