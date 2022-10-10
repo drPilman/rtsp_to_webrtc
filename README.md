@@ -9,4 +9,5 @@ gst-launch-1.0 rtspsrc location=rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBu
 ```
 
 /api/add_track
+
 /view?id=0
