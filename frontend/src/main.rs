@@ -170,11 +170,11 @@ fn view_source() -> Html {
             (),
         );
     }*/
-    let t = use_location().unwrap().search();
+    //let t = use_location().unwrap().search();
     html! {
         <>
-            <h1>{ "RustConf Explorer" }</h1>
-            <h2>{ t }</h2>
+            <h1>{ "View" }</h1>
+            //<h2>{ t }</h2>
             <div id="remoteVideos"></div>
             <script type={"text/javascript"} src={"/assets/webrtc.js"}/>
         </>

@@ -69,11 +69,9 @@ pub struct SourcesView {
 impl SourcesView {
     pub fn new(sources: &Sources) -> Self {
         let mut list_view = Vec::<SourceView>::with_capacity(sources.list.len());
-        log::debug!("{:?}", sources.list);
-        for (source, source_view) in (sources.list).iter().zip(list_view.iter_mut()) {
-            *source_view = SourceView::new(source);
+        for source in sources.list.iter() {
+            list_view.push(SourceView::new(source));
         }
-        log::debug!("{:?}", list_view);
         SourcesView { list: list_view }
     }
 }
