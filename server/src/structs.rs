@@ -4,51 +4,77 @@ use clap::Parser;
 use color_eyre::Report;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::mpsc::{Receiver, Sender};
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
-
-pub struct LocalTrack {
-    pub tx: Sender<Arc<TrackLocalStaticRTP>>,
-    pub rx: Receiver<Arc<TrackLocalStaticRTP>>,
-}
-
+use webrtc::track::track_local::TrackLocal;
 #[derive(Deserialize, Serialize)]
 pub struct SessionOffer {
     pub session_description: String,
     pub id: usize,
 }
 
-#[derive(Serialize)]
-pub struct Source<'a> {
+#[derive(Debug)]
+pub struct Source {
     pub state: bool,
-    pub url: &'a str,
-    #[serde(skip)]
-    pub track: LocalTrack,
+    pub url: String,
+    pub track: Arc<TrackLocalStaticRTP>,
 }
 
-#[derive(Serialize)]
-pub struct Sources<'b> {
-    pub list: Vec<Source<'b>>,
+impl Source {
+    pub fn connect(&self) -> Result<Arc<dyn TrackLocal + Send + Sync>, &str> {
+        if self.state {
+            Ok(Arc::clone(&self.track) as Arc<dyn TrackLocal + Send + Sync>)
+        } else {
+            Err("aaa")
+        }
+    }
 }
 
-impl<'a> Sources<'a> {
+pub struct Sources {
+    pub list: Vec<Source>,
+}
+
+impl Sources {
     pub fn new() -> Self {
         Self {
             list: Vec::with_capacity(5),
         }
     }
-    pub fn add(&mut self, url: &'a str) {
+    pub fn add(&mut self, url: String, track: Arc<TrackLocalStaticRTP>) {
         self.list.push(Source {
             state: true,
             url,
-            track: LocalTrack { rx: 0, tx: 0 },
+            track,
         });
     }
-    pub fn list_view(&self) {
-        let list_copy = Vec::<Source>::with_capacity(self.list.len());
-        for (source, source_copy) in (&self.list).iter().zip(list_copy) {
-            source_copy = Source {};
+}
+
+#[derive(Serialize, Debug)]
+pub struct SourceView {
+    pub state: bool,
+    pub url: String,
+}
+impl SourceView {
+    pub fn new(source: &Source) -> Self {
+        SourceView {
+            state: source.state.clone(),
+            url: source.url.clone(),
         }
+    }
+}
+
+#[derive(Serialize)]
+pub struct SourcesView {
+    pub list: Vec<SourceView>,
+}
+impl SourcesView {
+    pub fn new(sources: &Sources) -> Self {
+        let mut list_view = Vec::<SourceView>::with_capacity(sources.list.len());
+        log::debug!("{:?}", sources.list);
+        for (source, source_view) in (sources.list).iter().zip(list_view.iter_mut()) {
+            *source_view = SourceView::new(source);
+        }
+        log::debug!("{:?}", list_view);
+        SourcesView { list: list_view }
     }
 }
 
@@ -81,7 +107,7 @@ pub struct Opt {
     pub log_level: String,
 
     /// set the listen addr
-    #[clap(short = 'a', long = "addr", default_value = "127.0.0.1")]
+    #[clap(short = 'a', long = "addr", default_value = "0.0.0.0")]
     pub addr: String,
 
     /// set the listen port

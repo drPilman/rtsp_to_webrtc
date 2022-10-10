@@ -47,9 +47,6 @@ pc.onicecandidate = event => {
     }
 }
 
-// Offer to receive 1 audio, and 2 video tracks
-pc.addTransceiver('audio', { 'direction': 'recvonly' })
-pc.addTransceiver('video', { 'direction': 'recvonly' })
 pc.addTransceiver('video', { 'direction': 'recvonly' })
 pc.createOffer().then(d => pc.setLocalDescription(d)).catch(console.log)
 

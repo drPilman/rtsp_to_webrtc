@@ -18,9 +18,50 @@ use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::{TrackLocal, TrackLocalWriter};
 use webrtc::Error;
 
-pub async fn webrtc_session(desc_data: String, source_url: &str) -> Result<String> {
+pub async fn new_track<'a>() -> Arc<TrackLocalStaticRTP> {
     let (local_track_chan_tx, mut local_track_chan_rx) =
         tokio::sync::mpsc::channel::<Arc<TrackLocalStaticRTP>>(1);
+
+    let listener = UdpSocket::bind("127.0.0.1:5004")
+        .await
+        .expect("couldn't bind to address");
+    /*listener
+    .connect(source_url)
+    .await
+    .expect("couldn't connect to address");*/
+    //let done_tx3 = done_tx.clone();
+
+    tokio::spawn(async move {
+        let local_track = Arc::new(TrackLocalStaticRTP::new(
+            RTCRtpCodecCapability {
+                mime_type: MIME_TYPE_VP8.to_owned(),
+                ..Default::default()
+            },
+            "video".to_owned(),
+            "webrtc-rs".to_owned(),
+        ));
+        let _ = local_track_chan_tx.send(Arc::clone(&local_track)).await;
+        let mut inbound_rtp_packet = vec![0u8; 1600]; // UDP MTU
+
+        while let Ok((n, _)) = listener.recv_from(&mut inbound_rtp_packet).await {
+            if let Err(err) = local_track.write(&inbound_rtp_packet[..n]).await {
+                if Error::ErrClosedPipe == err {
+                    log::debug!("The peerConnection has been closed.");
+                    // The peerConnection has been closed.
+                } else {
+                    log::debug!("video_track write err: {}", err);
+                }
+                return;
+            }
+        }
+    });
+    local_track_chan_rx.recv().await.unwrap()
+}
+
+pub async fn webrtc_session(
+    desc_data: String,
+    track: Arc<dyn TrackLocal + Send + Sync>,
+) -> Result<String> {
     let mut m = MediaEngine::default();
 
     m.register_default_codecs()?;
@@ -53,19 +94,8 @@ pub async fn webrtc_session(desc_data: String, source_url: &str) -> Result<Strin
     let peer_connection = Arc::new(api.new_peer_connection(config).await?);
 
     // Create Track that we send video back to browser on
-    let video_track = Arc::new(TrackLocalStaticRTP::new(
-        RTCRtpCodecCapability {
-            mime_type: MIME_TYPE_VP8.to_owned(),
-            ..Default::default()
-        },
-        "video".to_owned(),
-        "webrtc-rs".to_owned(),
-    ));
-
     // Add this newly created track to the PeerConnection
-    let rtp_sender = peer_connection
-        .add_track(Arc::clone(&video_track) as Arc<dyn TrackLocal + Send + Sync>)
-        .await?;
+    let rtp_sender = peer_connection.add_track(track).await?;
 
     // Read incoming RTCP packets
     // Before these packets are returned they are processed by interceptors. For things
@@ -150,19 +180,19 @@ pub async fn webrtc_session(desc_data: String, source_url: &str) -> Result<Strin
         Err(anyhow!("generate local_description failed!"))
     };
 
-    log::debug!("OK 314");
+    //log::debug!("OK 314");
     // Open a UDP Listener for RTP Packets on port 5004
-    let listener = UdpSocket::bind("127.0.0.1:5004")
-        .await
-        .expect("couldn't bind to address");
+    /*let listener = UdpSocket::bind("127.0.0.1:5004")
+    .await
+    .expect("couldn't bind to address");*/
     /*listener
     .connect(source_url)
     .await
     .expect("couldn't connect to address");*/
-    let done_tx3 = done_tx.clone();
+    //let done_tx3 = done_tx.clone();
 
     // Read RTP packets forever and send them to the WebRTC Client
-    tokio::spawn(async move {
+    /*tokio::spawn(async move {
         let mut inbound_rtp_packet = vec![0u8; 1600]; // UDP MTU
         while let Ok((n, _)) = listener.recv_from(&mut inbound_rtp_packet).await {
             if let Err(err) = video_track.write(&inbound_rtp_packet[..n]).await {
@@ -176,8 +206,8 @@ pub async fn webrtc_session(desc_data: String, source_url: &str) -> Result<Strin
                 return;
             }
         }
-    });
-    log::debug!("OK 336");
+    });*/
+    //log::debug!("OK 336");
     /*log::debug!("Press ctrl-c to stop");
     tokio::select! {
         _ = done_rx.recv() => {
