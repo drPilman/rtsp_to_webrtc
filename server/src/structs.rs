@@ -76,6 +76,12 @@ impl SourcesView {
     }
 }
 
+#[derive(Deserialize)]
+pub struct NewSource {
+    pub url: String,
+    pub token: String,
+}
+
 pub struct ReportError(pub Report);
 
 impl From<Report> for ReportError {

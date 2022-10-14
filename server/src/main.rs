@@ -31,13 +31,15 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let shared_state = Arc::new(RwLock::new(Sources::new()));
+    let admin_token = String::from_str("123456").unwrap();
 
     let app = Router::new()
         .route("/api/get_sources_list", get(get_sources_list))
-        .route("/api/add_source", get(add_source))
+        .route("/api/add_source", post(add_source))
         .route("/api/view", post(view))
         .merge(SpaRouter::new("/assets", opt.static_dir))
         .layer(Extension(shared_state))
+        .layer(Extension(admin_token))
         .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()));
 
     let sock_addr = SocketAddr::from((

@@ -175,7 +175,7 @@ fn view_source() -> Html {
         <>
             <h1>{ "View" }</h1>
             //<h2>{ t }</h2>
-            <div id="remoteVideos"></div>
+            <div id="remoteVideo"></div>
             <script type={"text/javascript"} src={"/assets/webrtc.js"}/>
         </>
     }

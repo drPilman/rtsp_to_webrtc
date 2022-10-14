@@ -15,13 +15,20 @@ pub async fn get_sources_list(
 }
 
 pub async fn add_source(
+    extract::Json(payload): extract::Json<NewSource>,
     Extension(state): Extension<Arc<RwLock<Sources>>>,
+    Extension(admin_token): Extension<String>,
 ) -> Result<impl IntoResponse, ReportError> {
-    let track = new_track().await;
+    if admin_token.ne(&payload.token) {
+        return Err(ReportError(eyre!("token is wrong")));
+    }
+    let d = (*state).read().unwrap().list.len();
+
+    let track = new_track(&payload.url, Arc::clone(&state), d).await;
     match track {
         Some(track) => {
             let mut data = (*state).write().unwrap();
-            data.add("127.0.0.1:5004".to_owned(), track);
+            data.add(payload.url, track);
             Ok("Done")
         }
         None => Ok("Not Done"),

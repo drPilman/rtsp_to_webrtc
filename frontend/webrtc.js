@@ -14,13 +14,21 @@ pc.ontrack = function (event) {
     el.autoplay = true
     el.controls = true
 
-    document.getElementById('remoteVideos').appendChild(el)
+    document.getElementById('remoteVideo').appendChild(el)
 }
 
 pc.oniceconnectionstatechange = e => console.log(pc.iceConnectionState)
 pc.onicecandidate = event => {
     if (event.candidate === null) {
+
         let local_descr = btoa(JSON.stringify(pc.localDescription))
+
+        const params = new Proxy(new URLSearchParams(window.location.search), {
+            get: (searchParams, prop) => searchParams.get(prop),
+        });
+        // Get the value of "id" in eg "https://example.com/?id=some_value"
+        let value = parseInt(params.id);
+
         fetch("/api/view", {
             method: "post",
             headers: {
@@ -31,7 +39,7 @@ pc.onicecandidate = event => {
             //make sure to serialize your JSON body
             body: JSON.stringify({
                 session_description: local_descr,
-                id: 0
+                id: value
             })
         })
             .then((response) => response.json())

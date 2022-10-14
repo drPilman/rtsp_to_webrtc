@@ -1,3 +1,4 @@
+use crate::structs::*;
 use crate::utils::*;
 
 use anyhow::{anyhow, Result};
@@ -6,18 +7,20 @@ use gst::Message;
 use gst::StateChangeSuccess;
 use serde_json;
 use std::future;
-use std::sync::Arc;
-use tokio::time::{sleep, Duration};
+
+use std::sync::{Arc, RwLock};
+//use tokio::time::{sleep, Duration};
 //use tokio::net::UdpSocket;
 use anyhow::Error;
-use core::marker::Unpin;
+//use core::marker::Unpin;
 use derive_more::{Display, Error};
 use futures::executor::block_on;
 use gst::element_error;
 use gst::prelude::*;
-use gst::ClockTime;
+//use gst::ClockTime;
 use gst::MessageView;
-use std::pin::Pin;
+//use std::pin::Pin;
+use std::str::FromStr;
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_VP8};
 use webrtc::api::APIBuilder;
@@ -43,12 +46,12 @@ struct ErrorMessage {
     source: glib::Error,
 }
 
-fn create_pipeline() -> Result<gst::Pipeline, Error> {
-    let pipeline = gst::parse_launch(
-        "rtspsrc location=rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mp4 \
+fn create_pipeline(url: &str) -> Result<gst::Pipeline, Error> {
+    let pipeline = gst::parse_launch(&format!(
+        "rtspsrc location={url} \
         ! decodebin ! videoconvert ! vp8enc error-resilient=partitions keyframe-max-dist=10 auto-alt-ref=true \
         cpu-used=5 deadline=1 ! rtpvp8pay ! appsink name=appsink",
-    )
+    ))
     .unwrap();
     let pipeline = pipeline.dynamic_cast::<gst::Pipeline>().unwrap();
     Ok(pipeline)
@@ -95,9 +98,15 @@ fn try_play(pipeline: &gst::Pipeline, count: u32) -> bool {
     false
 }*/
 
-pub async fn new_track<'a>() -> Option<Arc<TrackLocalStaticRTP>> {
+pub async fn new_track(
+    url: &str,
+    state: Arc<RwLock<Sources>>,
+    id: usize,
+) -> Option<Arc<TrackLocalStaticRTP>> {
     let (local_track_chan_tx, mut local_track_chan_rx) =
         tokio::sync::mpsc::channel::<Option<Arc<TrackLocalStaticRTP>>>(1);
+
+    let urll = url.to_owned();
 
     tokio::spawn(async move {
         gst::init().unwrap();
@@ -111,9 +120,8 @@ pub async fn new_track<'a>() -> Option<Arc<TrackLocalStaticRTP>> {
             "video".to_owned(),
             "webrtc-rs".to_owned(),
         ));
-
+        let mut pipeline = create_pipeline(&urll).unwrap();
         for i in 0..10 {
-            let pipeline = create_pipeline().unwrap();
             let sink = pipeline.by_name("appsink").unwrap();
             let appsink = sink
                 .dynamic_cast::<gst_app::AppSink>()
@@ -150,7 +158,7 @@ pub async fn new_track<'a>() -> Option<Arc<TrackLocalStaticRTP>> {
                         })?;
                         let inbound_rtp_packet = map.as_slice(); // TODO: move declaration to parent scope
                                                                  // like udp udp listener
-                        log::debug!("{:?}", inbound_rtp_packet.len());
+                                                                 //log::debug!("{:?}", inbound_rtp_packet.len());
                         match block_on(track_arc.write(&inbound_rtp_packet)) {
                             Ok(_) => Ok(gst::FlowSuccess::Ok),
                             Err(_) => Err(gst::FlowError::Error),
@@ -178,11 +186,29 @@ pub async fn new_track<'a>() -> Option<Arc<TrackLocalStaticRTP>> {
                     flag = true;
                     break;
                 }
-                _ => (),
+                _ => pipeline = create_pipeline(&urll).unwrap(),
             }
         }
         if flag {
             let _ = local_track_chan_tx.send(Some(local_track)).await;
+            let bus = pipeline
+                .bus()
+                .expect("Pipeline without bus. Shouldn't happen!");
+            let bus_stream = bus.stream();
+            let y = bus_stream.skip_while(|msg: &Message| {
+                log::debug!("New message from bus {:?}", msg.view());
+                let t = match msg.view() {
+                    MessageView::StateChanged(_) | MessageView::Error(_) | MessageView::Eos(_) => {
+                        false
+                    }
+                    _ => true,
+                };
+                future::ready(t)
+            });
+            let (msg, b) = y.into_future().await;
+            log::debug!("OOOOOO {:?}", msg.unwrap().view());
+            let mut data = (*state).write().unwrap();
+            data.list[id].state = false;
         } else {
             let _ = local_track_chan_tx.send(None).await.unwrap();
             return ();
