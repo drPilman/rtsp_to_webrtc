@@ -18,10 +18,15 @@ pub async fn add_source(
     Extension(state): Extension<Arc<RwLock<Sources>>>,
 ) -> Result<impl IntoResponse, ReportError> {
     let track = new_track().await;
-    let mut data = (*state).write().unwrap();
-    data.add("127.0.0.1:5004".to_owned(), track);
+    match track {
+        Some(track) => {
+            let mut data = (*state).write().unwrap();
+            data.add("127.0.0.1:5004".to_owned(), track);
+            Ok("Done")
+        }
+        None => Ok("Not Done"),
+    }
     //data.add("rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mp4");
-    Ok("Done")
 }
 
 #[debug_handler]

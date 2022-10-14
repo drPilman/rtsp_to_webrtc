@@ -1,10 +1,23 @@
 use crate::utils::*;
 
 use anyhow::{anyhow, Result};
+use futures::StreamExt;
+use gst::Message;
+use gst::StateChangeSuccess;
 use serde_json;
+use std::future;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 //use tokio::net::UdpSocket;
+use anyhow::Error;
+use core::marker::Unpin;
+use derive_more::{Display, Error};
+use futures::executor::block_on;
+use gst::element_error;
+use gst::prelude::*;
+use gst::ClockTime;
+use gst::MessageView;
+use std::pin::Pin;
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_VP8};
 use webrtc::api::APIBuilder;
@@ -17,13 +30,6 @@ use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::{TrackLocal, TrackLocalWriter};
-
-use anyhow::Error;
-use derive_more::{Display, Error};
-use futures::executor::block_on;
-use gst::element_error;
-use gst::prelude::*;
-
 #[derive(Debug, Display, Error)]
 #[display(fmt = "Missing element {}", _0)]
 struct MissingElement(#[error(not(source))] &'static str);
@@ -38,7 +44,6 @@ struct ErrorMessage {
 }
 
 fn create_pipeline() -> Result<gst::Pipeline, Error> {
-    gst::init()?;
     let pipeline = gst::parse_launch(
         "rtspsrc location=rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mp4 \
         ! decodebin ! videoconvert ! vp8enc error-resilient=partitions keyframe-max-dist=10 auto-alt-ref=true \
@@ -48,26 +53,55 @@ fn create_pipeline() -> Result<gst::Pipeline, Error> {
     let pipeline = pipeline.dynamic_cast::<gst::Pipeline>().unwrap();
     Ok(pipeline)
 }
+/*
+fn try_play(pipeline: &gst::Pipeline, count: u32) -> bool {
+    for i in 0..count {
+        pipeline.set_state(gst::State::Playing).unwrap();
 
-pub async fn new_track<'a>() -> Arc<TrackLocalStaticRTP> {
+        let (res, state1, state2) = pipeline.state(None); //ClockTime::from_seconds(1));
+                                                          // Err(StateChangeError), Paused, Playing
+                                                          // Ok(Async) Paused Playing
+                                                          // Ok(Success) Playing VoidPending
+        log::debug!(
+            "try play at {:?} times. result{:?} {:?} {:?}",
+            i,
+            res,
+            state1,
+            state2
+        );
+        match res {
+            Ok(StateChangeSuccess::Success) => return true,
+            Ok(StateChangeSuccess::Async) => {
+                if pipeline.state(ClockTime::from_seconds(2)).0 == Ok(StateChangeSuccess::Success) {
+                    return true;
+                }
+            }
+            _ => (),
+        }
+        pipeline.abort_state();
+        pipeline.set_state(gst::State::Null).unwrap();
+        let (res, state1, state2) = pipeline.state(None); //ClockTime::from_seconds(1));
+                                                          // Err(StateChangeError), Paused, Playing
+                                                          // Ok(Async) Paused Playing
+                                                          // Ok(Success) Playing VoidPending
+        log::debug!(
+            "try2 play at {:?} times. result{:?} {:?} {:?}",
+            i,
+            res,
+            state1,
+            state2
+        );
+    }
+    false
+}*/
+
+pub async fn new_track<'a>() -> Option<Arc<TrackLocalStaticRTP>> {
     let (local_track_chan_tx, mut local_track_chan_rx) =
-        tokio::sync::mpsc::channel::<Arc<TrackLocalStaticRTP>>(1);
-
-    /*let listener = UdpSocket::bind("127.0.0.1:5004")
-    .await
-    .expect("couldn't bind to address");*/
-    /*listener
-    .connect(source_url)
-    .await
-    .expect("couldn't connect to address");*/
-    //let done_tx3 = done_tx.clone();
+        tokio::sync::mpsc::channel::<Option<Arc<TrackLocalStaticRTP>>>(1);
 
     tokio::spawn(async move {
-        let pipeline = create_pipeline().unwrap();
-        let sink = pipeline.by_name("appsink").unwrap();
-        let appsink = sink
-            .dynamic_cast::<gst_app::AppSink>()
-            .expect("Sink element is expected to be an appsink!");
+        gst::init().unwrap();
+        let mut flag: bool = false;
 
         let local_track = Arc::new(TrackLocalStaticRTP::new(
             RTCRtpCodecCapability {
@@ -78,72 +112,155 @@ pub async fn new_track<'a>() -> Arc<TrackLocalStaticRTP> {
             "webrtc-rs".to_owned(),
         ));
 
-        let _ = local_track_chan_tx.send(Arc::clone(&local_track)).await;
+        for i in 0..10 {
+            let pipeline = create_pipeline().unwrap();
+            let sink = pipeline.by_name("appsink").unwrap();
+            let appsink = sink
+                .dynamic_cast::<gst_app::AppSink>()
+                .expect("Sink element is expected to be an appsink!");
 
-        //let mut inbound_rtp_packet = vec![0u8; 1600];
+            let track_arc = Arc::clone(&local_track);
 
-        //appsink.set_async(true);
+            //let mut inbound_rtp_packet = vec![0u8; 1600];
 
-        appsink.set_callbacks(
-            gst_app::AppSinkCallbacks::builder()
-                .new_sample(move |appsink| {
-                    let sample = appsink.pull_sample().map_err(|_| gst::FlowError::Eos)?;
-                    let buffer = sample.buffer().ok_or_else(|| {
-                        element_error!(
-                            appsink,
-                            gst::ResourceError::Failed,
-                            ("Failed to get buffer from appsink")
-                        );
+            //appsink.set_async(true);
 
-                        gst::FlowError::Error
-                    })?;
+            appsink.set_callbacks(
+                gst_app::AppSinkCallbacks::builder()
+                    .new_sample(move |appsink| {
+                        let sample = appsink.pull_sample().map_err(|_| gst::FlowError::Eos)?;
+                        let buffer = sample.buffer().ok_or_else(|| {
+                            element_error!(
+                                appsink,
+                                gst::ResourceError::Failed,
+                                ("Failed to get buffer from appsink")
+                            );
 
-                    let map = buffer.map_readable().map_err(|_| {
-                        element_error!(
-                            appsink,
-                            gst::ResourceError::Failed,
-                            ("Failed to map buffer readable")
-                        );
+                            gst::FlowError::Error
+                        })?;
 
-                        gst::FlowError::Error
-                    })?;
-                    let inbound_rtp_packet = map.as_slice(); // TODO: move declaration to parent scope
-                                                             // like udp udp listener
-                    log::debug!("{:?}", inbound_rtp_packet.len());
-                    match block_on(local_track.write(&inbound_rtp_packet)) {
-                        Ok(_) => Ok(gst::FlowSuccess::Ok),
-                        Err(_) => Err(gst::FlowError::Error),
-                    }
-                })
-                .build(),
-        );
+                        let map = buffer.map_readable().map_err(|_| {
+                            element_error!(
+                                appsink,
+                                gst::ResourceError::Failed,
+                                ("Failed to map buffer readable")
+                            );
 
-        // TODO
-        // it's not working. state always Ok but it broke after few microseconds sometimes
-        {
-            let mut state: Result<gst::StateChangeSuccess, gst::StateChangeError> =
-                Err(gst::StateChangeError);
-            for i in 0..10 {
-                state = pipeline.set_state(gst::State::Playing);
-                if state.is_ok() {
-                    log::debug!("connect over rtsp at {i} try");
+                            gst::FlowError::Error
+                        })?;
+                        let inbound_rtp_packet = map.as_slice(); // TODO: move declaration to parent scope
+                                                                 // like udp udp listener
+                        log::debug!("{:?}", inbound_rtp_packet.len());
+                        match block_on(track_arc.write(&inbound_rtp_packet)) {
+                            Ok(_) => Ok(gst::FlowSuccess::Ok),
+                            Err(_) => Err(gst::FlowError::Error),
+                        }
+                    })
+                    .build(),
+            );
+            pipeline.set_state(gst::State::Playing).unwrap();
+
+            let (res, state1, state2) = pipeline.state(None);
+            //ClockTime::from_seconds(1));
+
+            // Err(StateChangeError), Paused, Playing
+            // Ok(Async) Paused Playing
+            // Ok(Success) Playing VoidPending
+            log::debug!(
+                "try play at {:?} times. result{:?} {:?} {:?}",
+                i,
+                res,
+                state1,
+                state2
+            );
+            match res {
+                Ok(StateChangeSuccess::Success) => {
+                    flag = true;
                     break;
                 }
-                sleep(Duration::from_millis(500)).await;
+                _ => (),
             }
-            state
         }
-        .unwrap();
+        if flag {
+            let _ = local_track_chan_tx.send(Some(local_track)).await;
+        } else {
+            let _ = local_track_chan_tx.send(None).await.unwrap();
+            return ();
+        }
 
+        /*if try_play(&pipeline, 30) {
+            let _ = local_track_chan_tx.send(Some(track_arc)).await;
+        } else {
+            local_track_chan_tx.send(None).await.unwrap();
+            return ();
+        }*/
+
+        // how to get bus events
         /*let bus = pipeline
             .bus()
             .expect("Pipeline without bus. Shouldn't happen!");
+        let bus_stream = bus.stream();
 
-        // UDP MTU
+        let y = bus_stream.skip_while(|msg: &Message| {
+            log::debug!("{:?}", msg.view());
+            let t = match msg.view() {
+                MessageView::Progress(state) => {
+                    let y = msg.src().unwrap().name().to_string();
+                    log::error!("{:?}", y);
+                    false
+                }
+                _ => true,
+            };
+            future::ready(t)
+        });
+        let (msg, b) = y.into_future().await;
+        log::debug!("OOOOOO {:?}", msg.unwrap().view());*/
 
-        for msg in bus.iter_timed(gst::ClockTime::NONE) {
-            use gst::MessageView;
-            match msg.view() {
+        // how to get bus events BAD version
+        /*let bus = pipeline
+        .bus()
+        .expect("Pipeline without bus. Shouldn't happen!");*/
+
+        /*bus.add_watch(|_bus, _msg| {
+            //use gst::MessageView;
+            log::info!("!{:?}", _msg.view());
+            return glib::Continue(true);
+            //match msg.view() {
+            /*
+            MessageView::Eos(..) => return glib::Continue(false),
+            MessageView::Error(err) => {
+                pipeline.set_state(gst::State::Null).unwrap();
+                Err(ErrorMessage {
+                    src: msg
+                        .src()
+                        .map(|s| String::from(s.path_string()))
+                        .unwrap_or_else(|| String::from("None")),
+                    error: err.error().to_string(),
+                    debug: err.debug(),
+                    source: err.error(),
+                }
+                .into());
+            }
+            _ => (),*/
+            //}
+        })
+        .unwrap();*/
+
+        //let stream_future = bus_stream.into_future();
+
+        //let (msg, bus_stream) = stream_future.await;
+
+        //let main_loop = glib::MainLoop::new(None, false);
+        //main_loop.run();
+        //while let Some(msg) = bus_stream.poll_next_unpin(cx) {}
+        //let main_loop = glib::MainLoop::new(None, false);
+        //main_loop.run();
+
+        // very bad version
+        /*for _msg in bus.iter_timed(gst::ClockTime::NONE) {
+            //use gst::MessageView;
+            log::info!("!{:?}", _msg.view());
+            /*match msg.view() {
                 MessageView::Eos(..) => break,
                 MessageView::Error(err) => {
                     pipeline.set_state(gst::State::Null)?;
@@ -159,10 +276,10 @@ pub async fn new_track<'a>() -> Arc<TrackLocalStaticRTP> {
                     .into());
                 }
                 _ => (),
-            }
-        }
+            }*/
+        }*/
 
-        pipeline.set_state(gst::State::Null)?;*/
+        //pipeline.set_state(gst::State::Null).unwrap();
 
         /*if let Err(err) = local_track.write(&inbound_rtp_packet[..n]).await {
             if webrtc::Error::ErrClosedPipe == err {
