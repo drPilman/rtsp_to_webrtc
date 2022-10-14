@@ -23,12 +23,13 @@ pub async fn add_source(
         return Err(ReportError(eyre!("token is wrong")));
     }
     let d = (*state).read().unwrap().list.len();
+    let mut rt = tokio::runtime::Runtime::new().unwrap();
 
-    let track = new_track(&payload.url, Arc::clone(&state), d).await;
+    let track = new_track(&payload.url, Arc::clone(&state), d, &mut rt).await;
     match track {
         Some(track) => {
             let mut data = (*state).write().unwrap();
-            data.add(payload.url, track);
+            data.add(payload.url, track, rt);
             Ok("Done")
         }
         None => Ok("Not Done"),

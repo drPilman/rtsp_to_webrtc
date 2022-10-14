@@ -16,6 +16,7 @@ pub mod structs;
 pub mod utils;
 pub mod webrtc_impl;
 
+use dotenv;
 use routes::*;
 use structs::*;
 
@@ -31,7 +32,9 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let shared_state = Arc::new(RwLock::new(Sources::new()));
-    let admin_token = String::from_str("123456").unwrap();
+    dotenv::dotenv().ok();
+    let admin_token = dotenv::var("ADMIN_TOKEN").unwrap();
+    log::info!("Token: {}", admin_token);
 
     let app = Router::new()
         .route("/api/get_sources_list", get(get_sources_list))

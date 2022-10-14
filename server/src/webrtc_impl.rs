@@ -7,8 +7,8 @@ use gst::Message;
 use gst::StateChangeSuccess;
 use serde_json;
 use std::future;
-
 use std::sync::{Arc, RwLock};
+use tokio::runtime::Runtime;
 //use tokio::time::{sleep, Duration};
 //use tokio::net::UdpSocket;
 use anyhow::Error;
@@ -20,7 +20,7 @@ use gst::prelude::*;
 //use gst::ClockTime;
 use gst::MessageView;
 //use std::pin::Pin;
-use std::str::FromStr;
+//use std::str::FromStr;
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_VP8};
 use webrtc::api::APIBuilder;
@@ -102,13 +102,14 @@ pub async fn new_track(
     url: &str,
     state: Arc<RwLock<Sources>>,
     id: usize,
+    rt: &mut Runtime,
 ) -> Option<Arc<TrackLocalStaticRTP>> {
     let (local_track_chan_tx, mut local_track_chan_rx) =
         tokio::sync::mpsc::channel::<Option<Arc<TrackLocalStaticRTP>>>(1);
 
     let urll = url.to_owned();
-
-    tokio::spawn(async move {
+    //tokio::spawn
+    rt.spawn(async move {
         gst::init().unwrap();
         let mut flag: bool = false;
 
@@ -198,14 +199,16 @@ pub async fn new_track(
             let y = bus_stream.skip_while(|msg: &Message| {
                 log::debug!("New message from bus {:?}", msg.view());
                 let t = match msg.view() {
-                    MessageView::StateChanged(_) | MessageView::Error(_) | MessageView::Eos(_) => {
-                        false
-                    }
+                    MessageView::StateChanged(state) => match state.current() {
+                        gst::State::Playing | gst::State::Ready | gst::State::Paused => true,
+                        _ => false,
+                    },
+                    MessageView::Error(_) | MessageView::Eos(_) => false,
                     _ => true,
                 };
                 future::ready(t)
             });
-            let (msg, b) = y.into_future().await;
+            let (msg, _) = y.into_future().await;
             log::debug!("OOOOOO {:?}", msg.unwrap().view());
             let mut data = (*state).write().unwrap();
             data.list[id].state = false;

@@ -36,3 +36,4 @@ gst-base = { package = "gstreamer-base", version = "0.18.0", features = ["v1_20"
 gst-video = { package = "gstreamer-video", version = "0.18.7", features = ["v1_20"] }
 gst-pbutils = { package = "gstreamer-pbutils", version = "0.18.7", features = ["v1_20"] }
 glib = "0.15.12"
+dotenv = "0.15.0"

@@ -4,8 +4,10 @@ use clap::Parser;
 use color_eyre::Report;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tokio::runtime::Runtime;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::TrackLocal;
+
 #[derive(Deserialize, Serialize)]
 pub struct SessionOffer {
     pub session_description: String,
@@ -17,6 +19,7 @@ pub struct Source {
     pub state: bool,
     pub url: String,
     pub track: Arc<TrackLocalStaticRTP>,
+    pub thread: Runtime,
 }
 
 impl Source {
@@ -24,7 +27,7 @@ impl Source {
         if self.state {
             Ok(Arc::clone(&self.track) as Arc<dyn TrackLocal + Send + Sync>)
         } else {
-            Err("aaa")
+            Err("???")
         }
     }
 }
@@ -39,11 +42,12 @@ impl Sources {
             list: Vec::with_capacity(5),
         }
     }
-    pub fn add(&mut self, url: String, track: Arc<TrackLocalStaticRTP>) {
+    pub fn add(&mut self, url: String, track: Arc<TrackLocalStaticRTP>, thread: Runtime) {
         self.list.push(Source {
             state: true,
             url,
             track,
+            thread,
         });
     }
 }
