@@ -98,18 +98,18 @@ fn try_play(pipeline: &gst::Pipeline, count: u32) -> bool {
     false
 }*/
 
+#[tokio::main]
 pub async fn new_track(
     url: &str,
     state: Arc<RwLock<Sources>>,
     id: usize,
-    rt: &mut Runtime,
-) -> Option<Arc<TrackLocalStaticRTP>> {
+) -> Option<(Arc<TrackLocalStaticRTP>, Arc<gst::Pipeline>)> {
     let (local_track_chan_tx, mut local_track_chan_rx) =
-        tokio::sync::mpsc::channel::<Option<Arc<TrackLocalStaticRTP>>>(1);
+        tokio::sync::mpsc::channel::<Option<(Arc<TrackLocalStaticRTP>, Arc<gst::Pipeline>)>>(1);
 
     let urll = url.to_owned();
     //tokio::spawn
-    rt.spawn(async move {
+    tokio::spawn(async move {
         gst::init().unwrap();
         let mut flag: bool = false;
 
@@ -191,7 +191,11 @@ pub async fn new_track(
             }
         }
         if flag {
-            let _ = local_track_chan_tx.send(Some(local_track)).await;
+            let pipeline = Arc::new(pipeline);
+            let _ = local_track_chan_tx
+                .send(Some((local_track, Arc::clone(&pipeline))))
+                .await;
+
             let bus = pipeline
                 .bus()
                 .expect("Pipeline without bus. Shouldn't happen!");

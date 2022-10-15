@@ -39,6 +39,7 @@ async fn main() {
     let app = Router::new()
         .route("/api/get_sources_list", get(get_sources_list))
         .route("/api/add_source", post(add_source))
+        .route("/api/stop_source", post(stop_source))
         .route("/api/view", post(view))
         .merge(SpaRouter::new("/assets", opt.static_dir))
         .layer(Extension(shared_state))

@@ -2,8 +2,11 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use clap::Parser;
 use color_eyre::Report;
+use gst::prelude::ElementExtManual;
 use serde::{Deserialize, Serialize};
+use std::mem;
 use std::sync::Arc;
+use tokio;
 use tokio::runtime::Runtime;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::TrackLocal;
@@ -19,16 +22,28 @@ pub struct Source {
     pub state: bool,
     pub url: String,
     pub track: Arc<TrackLocalStaticRTP>,
-    pub thread: Runtime,
+    pub pipe: Arc<gst::Pipeline>,
 }
 
 impl Source {
-    pub fn connect(&self) -> Result<Arc<dyn TrackLocal + Send + Sync>, &str> {
+    pub fn connect<'a>(&'a self) -> Result<Arc<dyn TrackLocal + Send + Sync>, &'static str> {
         if self.state {
             Ok(Arc::clone(&self.track) as Arc<dyn TrackLocal + Send + Sync>)
         } else {
-            Err("???")
+            Err("this source isn't active")
         }
+    }
+    pub fn stop(&mut self) {
+        self.state = false;
+        self.pipe.send_event(gst::event::Eos::new());
+        /*let rt = mem::replace(&mut self.thread, None).unwrap();
+
+        let _ = tokio::block_on(async move {
+            rt.unwrap()
+                .shutdown_timeout(std::time::Duration::from_secs(1));
+        })
+        .await;*/
+        log::debug!("destroy");
     }
 }
 
@@ -42,12 +57,12 @@ impl Sources {
             list: Vec::with_capacity(5),
         }
     }
-    pub fn add(&mut self, url: String, track: Arc<TrackLocalStaticRTP>, thread: Runtime) {
+    pub fn add(&mut self, url: String, track: Arc<TrackLocalStaticRTP>, pipe: Arc<gst::Pipeline>) {
         self.list.push(Source {
             state: true,
             url,
             track,
-            thread,
+            pipe,
         });
     }
 }
@@ -83,6 +98,12 @@ impl SourcesView {
 #[derive(Deserialize)]
 pub struct NewSource {
     pub url: String,
+    pub token: String,
+}
+
+#[derive(Deserialize)]
+pub struct StopSource {
+    pub id: usize,
     pub token: String,
 }
 
